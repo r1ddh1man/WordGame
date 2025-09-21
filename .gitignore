@@ -1,0 +1,46 @@
+# --- General ---
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+env/
+venv/
+*.egg-info/
+.eggs/
+
+# --- Java ---
+*.class
+*.jar
+*.war
+*.ear
+target/
+bin/
+build/
+out/
+.gradle/
+.mvn/
+.settings/
+.classpath
+.project
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+build/
+.npm/
+.yarn/
+.pnp.*
+coverage/
+.cache/
+
+# --- IDEs / Editors ---
+.vscode/
+.idea/
+*.iml
+*.swp
