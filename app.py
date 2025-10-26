@@ -1,17 +1,38 @@
 import streamlit as st
 from pathlib import Path
-from wordgame import load_engine_from_file, WordGame, GuessResult 
+from providers import OnlineWordProvider
+from wordgame import load_engine_from_file, WordGame
 
 # ---------- App setup ----------
 st.set_page_config(page_title="Word Game Gift", page_icon="💌", layout="centered")
 st.title("💌 Word Game — A Gift")
 st.markdown("Guess the secret word! Feedback shows how many **unique letters** your guess has in common with the secret. Duplicates count once.")
 
+@st.cache_data(ttl=5) # refresh every ~5s
+def _probe_online(timeout: int) -> bool:
+    try:
+        prov = OnlineWordProvider(timeout=timeout)
+        return prov.check_online()
+    except Exception:
+        return False
+
+def _status_badge(online: bool, label: str = ""):
+    mode = "Online" if online else "Offline"
+    color = "#16a34a" if online else "#ef4444"
+    extra = f" — {label}" if label else ""
+    st.markdown(
+        f"<span style='display:inline-block;padding:4px 8px;border-radius:999px;"
+        f"font-weight:600;background:{color};color:white;'>[{mode}{extra}]</span>",
+        unsafe_allow_html=True
+    )
+
 # ---------- Load engine once ----------
-def init_engine(max_attempts: int = 20):
-    # Make the words path robust: relative to this file
+def init_engine(max_attempts: int = 20) -> WordGame:
     words_path = (Path(__file__).parent / "words.txt").resolve()
-    engine = load_engine_from_file(words_path, max_attempts=max_attempts)
+    try:
+        engine = load_engine_from_file(words_path, max_attempts=max_attempts)
+    except FileNotFoundError:
+        engine = WordGame(words_by_length={}, max_attempts=max_attempts)
     return engine
 
 if "engine" not in st.session_state:
@@ -24,16 +45,19 @@ with st.sidebar:
     st.header("Game Controls")
     length = st.number_input("Word length", min_value=3, max_value=15, value=5, step=1)
     attempts = st.number_input("Max attempts", min_value=5, max_value=20, value=20, step=1)
-    require_dict = st.checkbox("Require guess to be in dictionary", value=False,
-                               help="If ON, only guesses that exist in words.txt are accepted.")
-
+    
     colA, colB = st.columns(2)
     with colA:
         if st.button("🔁 New Game", use_container_width=True):
             # keep same engine (words bucket) but update attempts and start round
             eng.max_attempts = int(attempts)
-            eng.new_game(int(length))
-            st.rerun()
+            try:
+                eng.new_game(int(length))
+            except ValueError as e:
+                st.error(str(e))
+            else:
+                # st.session_state.last_source = eng.secret_source
+                st.rerun()
     with colB:
         if st.button("♻️ Reset Engine", use_container_width=True,
                      help="Reload words.txt (use this if you changed the file)."):
@@ -41,6 +65,7 @@ with st.sidebar:
             # also immediately start a round at chosen length if possible
             try:
                 st.session_state.engine.new_game(int(length))
+                # st.session_state.last_source = st.session_state.engine.secret_source
             except ValueError:
                 pass
             st.rerun()
@@ -58,6 +83,21 @@ cols[0].metric("Status", eng.status.capitalize())
 cols[1].metric("Attempts left", eng.attempts_left)
 cols[2].metric("Word length", eng.length)
 
+#Connection mode
+# if eng.status != "idle" and eng.secret_source:
+#     src = eng.secret_source.lower()
+#     mode = "online" if eng.secret_source == "online" else "offline"
+#     color = "#16a34a" if mode == "online" else "#ef4444"
+#     st.markdown(
+#         f"<span style='display:inline-block;padding:4px 8px;border-radius:999px;"
+#         f"font-weight:600;background:{color};color:white;'>[{mode}]</span>",
+#         unsafe_allow_html=True
+#     )
+
+# Live connection badge (probe every rerun) + show source of secret for clarity
+is_online_now = _probe_online(timeout=2)
+_status_badge(is_online_now, label="now")
+
 st.divider()
 
 # ---------- Guess input ----------
@@ -72,7 +112,7 @@ submit = st.button("Guess", type="primary", disabled=disabled)
 
 # ---------- Handle a guess ----------
 if submit and eng.status == "playing":
-    result: GuessResult = eng.guess(guess, require_in_dictionary=require_dict)
+    result = eng.guess(guess)
     if not result.valid:
         st.warning(result.message)
     else:

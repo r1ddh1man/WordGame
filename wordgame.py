@@ -17,7 +17,8 @@ import random
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Union
+from providers import OnlineWordProvider
 
 
 # -------------------------
@@ -70,6 +71,9 @@ class GuessResult:
 class WordGame:
     words_by_length: Dict[int, List[str]]
     max_attempts: int = 20
+    provider: Optional[OnlineWordProvider] = None
+    
+    connection_mode: Optional[str] = field(default=None, init=False)
 
     # internal state (set on new_game)
     length: Optional[int] = None
@@ -83,17 +87,36 @@ class WordGame:
     def new_game(self, length: int) -> "WordGame":
         """
         Start a new round for a given word length.
-        Raises ValueError if no words exist for that length.
+        Tries provider first; falls back to local words_by_length.
+        Raises ValueError if neither source can supply a word.
         """
         if length <= 0:
             raise ValueError("Please choose a positive word length.")
+        
+        self.length = length
+        secret: Optional[str] = None
+        source: Optional[str] = None
 
-        pool = self.words_by_length.get(length, [])
-        if not pool:
+        # 1) ONLINE first (if provider available)
+        if self.provider is not None:
+            try:
+                secret = self.provider.get_random_word(length)
+                if secret:
+                    self.connection_mode = self.provider.last_mode or "online"
+            except Exception:
+                secret = None
+
+        # 2) FALLBACK to local dictionary
+        if not secret:
+            pool = self.words_by_length.get(length, [])
+            if pool:
+                secret = random.choice(pool)
+                self.connection_mode = (self.provider.last_mode if self.provider else None) or "Offline"
+
+        if not secret:
             raise ValueError(f"No words of length {length} found. Try another length.")
 
-        self.length = length
-        self.secret = random.choice(pool)  # safe O(1) random pick
+        self.secret = secret.upper()
         self.attempts_left = self.max_attempts
         self.status = "playing"
         self._history.clear()
@@ -101,7 +124,7 @@ class WordGame:
 
     # ------------- gameplay -------------
 
-    def guess(self, word: str, *, require_in_dictionary: bool = False) -> GuessResult:
+    def guess(self, word: str) -> GuessResult:
         """
         Submit a guess. Returns a GuessResult with `common` when valid.
         - Valid guess: A-Z only, exactly self.length letters,
@@ -129,12 +152,34 @@ class WordGame:
                 valid=False,
                 message=f"Please enter exactly {self.length} letters."
             )
+        
+        # check if this guess was already made
+        for h in self._history:
+            if h["guess"] == guess:
+                return GuessResult(valid=False, message=f'You already guessed "{guess}". Try again.')
 
-        # Optional: dictionary membership check
-        if require_in_dictionary:
-            pool = self.words_by_length.get(self.length, [])
-            if guess not in pool:
-                return GuessResult(valid=False, message="Not found in dictionary.")
+        is_valid : Optional[bool] = None
+        used_online = False
+
+        if self.provider is not None:
+            try:
+                is_valid = self.provider.is_valid_word(guess)
+                used_online = (is_valid is not None)
+                self.connection_mode = self.provider.last_mode or self.connection_mode
+            except Exception:
+                used_online = False
+
+        if is_valid is None:
+            pool = self.words_by_length.get(self.length, []) if self.words_by_length else []
+            if pool and guess in pool:
+                is_valid = True
+            elif not pool:
+                return GuessResult(valid=False, message="Dictionary unavailable. Check internet or words.txt.")
+            if not used_online:
+                self.connection_mode = "offline"
+
+        if not is_valid:
+            return GuessResult(valid=False, message=f'"{guess}" is not in the dictionary.') 
 
         # Compute feedback (valid guess → consumes attempt)
         common = unique_common_letters(guess, self.secret)
@@ -188,6 +233,7 @@ def _cli():
     - Run:  python wordgame.py words.txt
     """
     import sys
+    from providers import OnlineWordProvider
 
     if len(sys.argv) < 2:
         print("Usage: python wordgame.py <words_file>")
@@ -195,6 +241,8 @@ def _cli():
 
     path = Path(sys.argv[1])
     engine = load_engine_from_file(path)
+
+    engine.provider = OnlineWordProvider(timeout=5)
 
     print("Welcome to the Common-Letters Word Game!")
     while True:
@@ -209,7 +257,7 @@ def _cli():
     print(f"OK! I chose a {engine.length}-letter word. You have {engine.max_attempts} attempts.")
     while engine.status == "playing":
         g = input("Your guess: ").strip()
-        res = engine.guess(g)  # set require_in_dictionary=True if you want strict checking
+        res = engine.guess(g)  # always validated online first, then local
         if not res.valid:
             print(f"[!] {res.message}")
             continue
