@@ -1,38 +1,17 @@
 import streamlit as st
 from pathlib import Path
 from providers import OnlineWordProvider
-from wordgame import load_engine_from_file, WordGame
+from wordgame import WordGame
 
 # ---------- App setup ----------
 st.set_page_config(page_title="Word Game Gift", page_icon="💌", layout="centered")
 st.title("💌 Word Game — A Gift")
 st.markdown("Guess the secret word! Feedback shows how many **unique letters** your guess has in common with the secret. Duplicates count once.")
 
-@st.cache_data(ttl=5) # refresh every ~5s
-def _probe_online(timeout: int) -> bool:
-    try:
-        prov = OnlineWordProvider(timeout=timeout)
-        return prov.check_online()
-    except Exception:
-        return False
-
-def _status_badge(online: bool, label: str = ""):
-    mode = "Online" if online else "Offline"
-    color = "#16a34a" if online else "#ef4444"
-    extra = f" — {label}" if label else ""
-    st.markdown(
-        f"<span style='display:inline-block;padding:4px 8px;border-radius:999px;"
-        f"font-weight:600;background:{color};color:white;'>[{mode}{extra}]</span>",
-        unsafe_allow_html=True
-    )
-
 # ---------- Load engine once ----------
 def init_engine(max_attempts: int = 20) -> WordGame:
-    words_path = (Path(__file__).parent / "words.txt").resolve()
-    try:
-        engine = load_engine_from_file(words_path, max_attempts=max_attempts)
-    except FileNotFoundError:
-        engine = WordGame(words_by_length={}, max_attempts=max_attempts)
+    engine = WordGame(max_attempts=max_attempts)
+    engine.provider = OnlineWordProvider(timeout=5)
     return engine
 
 if "engine" not in st.session_state:
@@ -60,7 +39,7 @@ with st.sidebar:
                 st.rerun()
     with colB:
         if st.button("♻️ Reset Engine", use_container_width=True,
-                     help="Reload words.txt (use this if you changed the file)."):
+                     help="Reset the engine (online only; no local file)."):
             st.session_state.engine = init_engine(max_attempts=int(attempts))
             # also immediately start a round at chosen length if possible
             try:
@@ -70,7 +49,6 @@ with st.sidebar:
                 pass
             st.rerun()
 
-    #st.caption("Tip: Put **words.txt** next to app.py (one word per line).")
 
 # ---------- If no active round, prompt to start ----------
 if eng.status == "idle" or eng.length is None:
@@ -82,21 +60,6 @@ cols = st.columns(3)
 cols[0].metric("Status", eng.status.capitalize())
 cols[1].metric("Attempts left", eng.attempts_left)
 cols[2].metric("Word length", eng.length)
-
-#Connection mode
-# if eng.status != "idle" and eng.secret_source:
-#     src = eng.secret_source.lower()
-#     mode = "online" if eng.secret_source == "online" else "offline"
-#     color = "#16a34a" if mode == "online" else "#ef4444"
-#     st.markdown(
-#         f"<span style='display:inline-block;padding:4px 8px;border-radius:999px;"
-#         f"font-weight:600;background:{color};color:white;'>[{mode}]</span>",
-#         unsafe_allow_html=True
-#     )
-
-# Live connection badge (probe every rerun) + show source of secret for clarity
-is_online_now = _probe_online(timeout=2)
-_status_badge(is_online_now, label="now")
 
 st.divider()
 

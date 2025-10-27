@@ -69,11 +69,9 @@ class GuessResult:
 
 @dataclass
 class WordGame:
-    words_by_length: Dict[int, List[str]]
+    # words_by_length: Dict[int, List[str]]
     max_attempts: int = 20
     provider: Optional[OnlineWordProvider] = None
-    
-    connection_mode: Optional[str] = field(default=None, init=False)
 
     # internal state (set on new_game)
     length: Optional[int] = None
@@ -87,34 +85,27 @@ class WordGame:
     def new_game(self, length: int) -> "WordGame":
         """
         Start a new round for a given word length.
-        Tries provider first; falls back to local words_by_length.
-        Raises ValueError if neither source can supply a word.
+        Online-only: requires an `OnlineWordProvider` and does not fall back
+        to local dictionaries.
         """
         if length <= 0:
             raise ValueError("Please choose a positive word length.")
         
         self.length = length
         secret: Optional[str] = None
-        source: Optional[str] = None
 
-        # 1) ONLINE first (if provider available)
-        if self.provider is not None:
-            try:
-                secret = self.provider.get_random_word(length)
-                if secret:
-                    self.connection_mode = self.provider.last_mode or "online"
-            except Exception:
-                secret = None
+        if self.provider is None:
+            raise ValueError("Online provider not configured. Cannot start a game.")
 
-        # 2) FALLBACK to local dictionary
-        if not secret:
-            pool = self.words_by_length.get(length, [])
-            if pool:
-                secret = random.choice(pool)
-                self.connection_mode = (self.provider.last_mode if self.provider else None) or "Offline"
+        try:
+            secret = self.provider.get_word(length)
+        except Exception:
+            secret = None
 
         if not secret:
-            raise ValueError(f"No words of length {length} found. Try another length.")
+            raise ValueError(
+                f"Unable to fetch an online word of length {length}. Check your internet connection and try again."
+            )
 
         self.secret = secret.upper()
         self.attempts_left = self.max_attempts
@@ -158,26 +149,17 @@ class WordGame:
             if h["guess"] == guess:
                 return GuessResult(valid=False, message=f'You already guessed "{guess}". Try again.')
 
-        is_valid : Optional[bool] = None
-        used_online = False
+        # ONLINE ONLY validation
+        if self.provider is None:
+            return GuessResult(valid=False, message="Online dictionary unavailable.")
 
-        if self.provider is not None:
-            try:
-                is_valid = self.provider.is_valid_word(guess)
-                used_online = (is_valid is not None)
-                self.connection_mode = self.provider.last_mode or self.connection_mode
-            except Exception:
-                used_online = False
+        try:
+            is_valid: Optional[bool] = self.provider.is_valid_word(guess)
+        except Exception:
+            is_valid = None
 
         if is_valid is None:
-            pool = self.words_by_length.get(self.length, []) if self.words_by_length else []
-            if pool and guess in pool:
-                is_valid = True
-            elif not pool:
-                return GuessResult(valid=False, message="Dictionary unavailable. Check internet or words.txt.")
-            if not used_online:
-                self.connection_mode = "offline"
-
+            return GuessResult(valid=False, message="Could not validate the word online. Please try again.")
         if not is_valid:
             return GuessResult(valid=False, message=f'"{guess}" is not in the dictionary.') 
 
@@ -220,7 +202,7 @@ def load_engine_from_file(path: Path, *, max_attempts: int = 20) -> WordGame:
     """
     words = load_words_file(path)
     by_len = build_by_length(words)
-    return WordGame(by_len, max_attempts=max_attempts)
+    return WordGame(max_attempts=max_attempts)
 
 
 # -------------------------
@@ -235,12 +217,12 @@ def _cli():
     import sys
     from providers import OnlineWordProvider
 
-    if len(sys.argv) < 2:
-        print("Usage: python wordgame.py <words_file>")
-        sys.exit(1)
+    # if len(sys.argv) < 2:
+    #     print("Usage: python wordgame.py <words_file>")
+    #     sys.exit(1)
 
-    path = Path(sys.argv[1])
-    engine = load_engine_from_file(path)
+    # path = Path(sys.argv[1])
+    engine = WordGame() # load_engine_from_file(path)
 
     engine.provider = OnlineWordProvider(timeout=5)
 
