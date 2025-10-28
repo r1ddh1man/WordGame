@@ -98,7 +98,7 @@ class WordGame:
             raise ValueError("Online provider not configured. Cannot start a game.")
 
         try:
-            secret = self.provider.get_word(length)
+            secret = self.provider.get_random_word(length)
         except Exception:
             secret = None
 
