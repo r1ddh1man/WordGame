@@ -88,6 +88,7 @@ class WordGame:
         Online-only: requires an `OnlineWordProvider` and does not fall back
         to local dictionaries.
         """
+        self.provider.clear_cache()
         if length <= 0:
             raise ValueError("Please choose a positive word length.")
         
@@ -153,10 +154,15 @@ class WordGame:
         if self.provider is None:
             return GuessResult(valid=False, message="Online dictionary unavailable.")
 
-        try:
-            is_valid: Optional[bool] = self.provider.is_valid_word(guess)
-        except Exception:
-            is_valid = None
+        if guess in self._valid_words:
+            is_valid: Optional[bool] = True
+        elif guess in self._invalid_words:
+            is_valid = False
+        else:
+            try:
+                is_valid = self.provider.is_valid_word(guess)
+            except Exception:
+                is_valid = None
 
         if is_valid is None:
             return GuessResult(valid=False, message="Could not validate the word online. Please try again.")
@@ -198,10 +204,9 @@ def load_words_file(path: Path) -> List[str]:
 
 def load_engine_from_file(path: Path, *, max_attempts: int = 20) -> WordGame:
     """
-    Convenience: load words, build buckets, and return a ready engine.
+    Convenience for parity with older versions. Currently online-only engine
+    with no local dictionary usage; returns a fresh engine.
     """
-    words = load_words_file(path)
-    by_len = build_by_length(words)
     return WordGame(max_attempts=max_attempts)
 
 
