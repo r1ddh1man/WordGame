@@ -27,9 +27,14 @@ class OnlineWordProvider:
         delay = self.backoff_base
         for attempt in range(1, self.max_retries + 1):
             try:
+                # response = requests.get(
+                #     f"https://random-word-api.herokuapp.com/word",
+                #     params={"length": length, "number": 1},
+                #     timeout=self.timeout
+                # )
                 response = requests.get(
-                    f"https://random-word-api.herokuapp.com/word",
-                    params={"length": length, "number": 1},
+                    f"https://random-word-api.vercel.app/api",
+                    params={"length": length, "words": 1},
                     timeout=self.timeout
                 )
                 response.raise_for_status()
