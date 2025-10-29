@@ -154,9 +154,10 @@ class WordGame:
         if self.provider is None:
             return GuessResult(valid=False, message="Online dictionary unavailable.")
 
-        if guess in self._valid_words:
+        # consult provider caches directly to avoid duplicate state
+        if guess in getattr(self.provider, "_valid_cache", set()):
             is_valid: Optional[bool] = True
-        elif guess in self._invalid_words:
+        elif guess in getattr(self.provider, "_invalid_cache", set()):
             is_valid = False
         else:
             try:
